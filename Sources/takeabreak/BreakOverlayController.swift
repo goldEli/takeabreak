@@ -32,12 +32,15 @@ final class BreakOverlayController {
 
     private func showOverlay() {
         guard windows.isEmpty else {
+            AppLogger.shared.log("Overlay already visible, bringing to front (\(windows.count) window(s))")
             windows.forEach { $0.orderFrontRegardless() }
             NSApplication.shared.presentationOptions = [.hideDock, .hideMenuBar]
             NSApplication.shared.activate(ignoringOtherApps: true)
             return
         }
 
+        let screenCount = NSScreen.screens.count
+        AppLogger.shared.log("Showing overlay on \(screenCount) screen(s)")
         previousPresentationOptions = NSApplication.shared.presentationOptions
         NSApplication.shared.presentationOptions = [.hideDock, .hideMenuBar]
 
@@ -69,6 +72,8 @@ final class BreakOverlayController {
     }
 
     private func hideOverlay() {
+        guard !windows.isEmpty else { return }
+        AppLogger.shared.log("Hiding overlay (\(windows.count) window(s))")
         windows.forEach { window in
             window.orderOut(nil)
             window.close()

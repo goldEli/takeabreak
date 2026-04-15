@@ -43,6 +43,13 @@ struct MenuBarContentView: View {
                     store.quitApplication()
                 }
             }
+
+            Button("Show Log in Finder") {
+                AppLogger.shared.revealInFinder()
+            }
+            .buttonStyle(.plain)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(width: 320)

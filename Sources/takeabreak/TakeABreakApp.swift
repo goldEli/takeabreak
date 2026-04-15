@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayController: BreakOverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLogger.shared.log("App launched (version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "?"))")
         NSApplication.shared.setActivationPolicy(.regular)
         applyAppIcon()
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -16,7 +17,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            Task { @MainActor in
+                if let error {
+                    AppLogger.shared.log("Notification permission error: \(error)", level: "ERROR")
+                } else {
+                    AppLogger.shared.log("Notification permission granted: \(granted)")
+                }
+            }
         }
     }
 

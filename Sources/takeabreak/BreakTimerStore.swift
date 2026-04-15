@@ -21,6 +21,9 @@ final class BreakTimerStore: ObservableObject {
 
     private var timer: Timer?
     private let meetingRetrySeconds = 60
+    private var pausedForSleep = false
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     private static let workMinutesKey = "workMinutes"
     private static let breakSecondsKey = "breakSeconds"
@@ -34,6 +37,40 @@ final class BreakTimerStore: ObservableObject {
         breakSeconds = max(1, storedBreakSeconds)
         remainingSeconds = max(1, storedWorkMinutes) * 60
         refreshStatusTitle()
+        registerSleepWakeObservers()
+    }
+
+    private func registerSleepWakeObservers() {
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObserver = nc.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleWillSleep() }
+        }
+        wakeObserver = nc.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleDidWake() }
+        }
+    }
+
+    private func handleWillSleep() {
+        guard isRunning else { return }
+        AppLogger.shared.log("System sleeping — pausing timer (phase=\(phase), remaining=\(remainingSeconds)s)")
+        pausedForSleep = true
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func handleDidWake() {
+        guard pausedForSleep else { return }
+        pausedForSleep = false
+        AppLogger.shared.log("System woke — resuming timer (phase=\(phase), remaining=\(remainingSeconds)s)")
+        startTimer()
     }
 
     var primaryButtonTitle: String {
@@ -78,6 +115,7 @@ final class BreakTimerStore: ObservableObject {
             return
         }
 
+        AppLogger.shared.log("Rest ended early by user")
         phase = .work
         remainingSeconds = workMinutes * 60
         refreshStatusTitle()
@@ -89,6 +127,7 @@ final class BreakTimerStore: ObservableObject {
 
     func updateWorkMinutes(_ newValue: Int) {
         let clampedValue = max(1, newValue)
+        AppLogger.shared.log("Config changed: workMinutes=\(clampedValue)")
         workMinutes = clampedValue
         UserDefaults.standard.set(clampedValue, forKey: Self.workMinutesKey)
 
@@ -101,6 +140,7 @@ final class BreakTimerStore: ObservableObject {
 
     func updateBreakSeconds(_ newValue: Int) {
         let clampedValue = max(1, newValue)
+        AppLogger.shared.log("Config changed: breakSeconds=\(clampedValue)")
         breakSeconds = clampedValue
         UserDefaults.standard.set(clampedValue, forKey: Self.breakSecondsKey)
 
@@ -118,12 +158,14 @@ final class BreakTimerStore: ObservableObject {
             remainingSeconds = breakSeconds
         }
 
+        AppLogger.shared.log("Timer started — phase=\(phase), remaining=\(remainingSeconds)s, workMinutes=\(workMinutes), breakSeconds=\(breakSeconds)")
         isRunning = true
         startTimer()
         refreshStatusTitle()
     }
 
     private func pause() {
+        AppLogger.shared.log("Timer paused — phase=\(phase), remaining=\(remainingSeconds)s")
         isRunning = false
         timer?.invalidate()
         timer = nil
@@ -156,7 +198,9 @@ final class BreakTimerStore: ObservableObject {
     private func advancePhase() {
         switch phase {
         case .work:
-            if MeetingDetector.isMeetingInProgress() {
+            let meetingInProgress = MeetingDetector.isMeetingInProgress()
+            AppLogger.shared.log("Work cycle ended — meetingDetected=\(meetingInProgress)")
+            if meetingInProgress {
                 remainingSeconds = meetingRetrySeconds
                 sendMeetingDelayNotification()
                 refreshStatusTitle()
@@ -164,9 +208,11 @@ final class BreakTimerStore: ObservableObject {
             }
 
             sendBreakNotification()
+            AppLogger.shared.log("Phase transition: work → rest (breakSeconds=\(breakSeconds))")
             phase = .rest
             remainingSeconds = breakSeconds
         case .rest:
+            AppLogger.shared.log("Phase transition: rest → work (workMinutes=\(workMinutes))")
             phase = .work
             remainingSeconds = workMinutes * 60
         }
@@ -189,6 +235,7 @@ final class BreakTimerStore: ObservableObject {
     }
 
     private func sendBreakNotification() {
+        AppLogger.shared.log("Notification sent: break reminder")
         let content = UNMutableNotificationContent()
         content.title = "Time to take a break"
         content.body = "You've been working for \(workMinutes) minutes. Starting a \(breakSeconds)-second break."
@@ -197,6 +244,7 @@ final class BreakTimerStore: ObservableObject {
     }
 
     private func sendMeetingDelayNotification() {
+        AppLogger.shared.log("Notification sent: meeting delay")
         let content = UNMutableNotificationContent()
         content.title = "Meeting detected"
         content.body = "Break postponed. The app will check again in 60 seconds."
