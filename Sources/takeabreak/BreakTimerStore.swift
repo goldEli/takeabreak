@@ -47,14 +47,14 @@ final class BreakTimerStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleWillSleep() }
+            MainActor.assumeIsolated { self?.handleWillSleep() }
         }
         wakeObserver = nc.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.handleDidWake() }
+            MainActor.assumeIsolated { self?.handleDidWake() }
         }
     }
 
