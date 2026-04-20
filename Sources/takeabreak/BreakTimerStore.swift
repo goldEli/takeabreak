@@ -24,6 +24,7 @@ final class BreakTimerStore: ObservableObject {
     private var pausedForSleep = false
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
+    private var activityToken: NSObjectProtocol?
 
     private static let workMinutesKey = "workMinutes"
     private static let breakSecondsKey = "breakSeconds"
@@ -64,12 +65,16 @@ final class BreakTimerStore: ObservableObject {
         pausedForSleep = true
         timer?.invalidate()
         timer = nil
+        endActivityIfNeeded()
     }
 
     private func handleDidWake() {
         guard pausedForSleep else { return }
         pausedForSleep = false
         AppLogger.shared.log("System woke — resuming timer (phase=\(phase), remaining=\(remainingSeconds)s)")
+        if remainingSeconds <= 0 {
+            advancePhase()
+        }
         startTimer()
     }
 
@@ -169,16 +174,32 @@ final class BreakTimerStore: ObservableObject {
         isRunning = false
         timer?.invalidate()
         timer = nil
+        endActivityIfNeeded()
         refreshStatusTitle()
     }
 
     private func startTimer() {
         timer?.invalidate()
+        beginActivityIfNeeded()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.tick()
-            }
+            MainActor.assumeIsolated { self?.tick() }
         }
+    }
+
+    private func beginActivityIfNeeded() {
+        guard activityToken == nil else { return }
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated],
+            reason: "TakeABreak timer running"
+        )
+        AppLogger.shared.log("App Nap prevention activated")
+    }
+
+    private func endActivityIfNeeded() {
+        guard let token = activityToken else { return }
+        ProcessInfo.processInfo.endActivity(token)
+        activityToken = nil
+        AppLogger.shared.log("App Nap prevention released")
     }
 
     private func tick() {

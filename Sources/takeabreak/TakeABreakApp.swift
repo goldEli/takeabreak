@@ -9,9 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.shared.log("App launched (version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "?"))")
-        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.setActivationPolicy(.accessory)
         applyAppIcon()
-        NSApplication.shared.activate(ignoringOtherApps: true)
         overlayController = BreakOverlayController(store: store)
         requestNotificationPermission()
     }
@@ -45,11 +44,6 @@ struct TakeABreakApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("TakeABreak") {
-            MenuBarContentView(store: appDelegate.store)
-                .frame(minWidth: 320, minHeight: 240)
-        }
-
         MenuBarExtra("TAB", systemImage: "cup.and.saucer.fill") {
             MenuBarContentView(store: appDelegate.store)
         }
