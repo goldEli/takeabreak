@@ -42,7 +42,7 @@ struct MeetingDetector {
 
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
@@ -50,13 +50,16 @@ struct MeetingDetector {
             return nil
         }
 
+        // Drain stdout before waiting: readDataToEndOfFile returns when the
+        // child closes its pipe (at exit). Calling waitUntilExit first
+        // deadlocks once ps output exceeds the pipe buffer (~16KB).
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
             return nil
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(decoding: data, as: UTF8.self)
         return output
             .split(separator: "\n")

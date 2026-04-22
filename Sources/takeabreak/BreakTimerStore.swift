@@ -22,6 +22,7 @@ final class BreakTimerStore: ObservableObject {
     private var timer: Timer?
     private let meetingRetrySeconds = 60
     private var pausedForSleep = false
+    private var isCheckingMeeting = false
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
     private var activityToken: NSObjectProtocol?
@@ -63,6 +64,7 @@ final class BreakTimerStore: ObservableObject {
         guard isRunning else { return }
         AppLogger.shared.log("System sleeping — pausing timer (phase=\(phase), remaining=\(remainingSeconds)s)")
         pausedForSleep = true
+        isCheckingMeeting = false
         timer?.invalidate()
         timer = nil
         endActivityIfNeeded()
@@ -172,6 +174,7 @@ final class BreakTimerStore: ObservableObject {
     private func pause() {
         AppLogger.shared.log("Timer paused — phase=\(phase), remaining=\(remainingSeconds)s")
         isRunning = false
+        isCheckingMeeting = false
         timer?.invalidate()
         timer = nil
         endActivityIfNeeded()
@@ -207,6 +210,12 @@ final class BreakTimerStore: ObservableObject {
             return
         }
 
+        // Hold at 0 while the off-main meeting check is in flight; the
+        // completion handler will drive the phase transition.
+        if isCheckingMeeting {
+            return
+        }
+
         remainingSeconds -= 1
 
         if remainingSeconds <= 0 {
@@ -219,25 +228,37 @@ final class BreakTimerStore: ObservableObject {
     private func advancePhase() {
         switch phase {
         case .work:
-            let meetingInProgress = MeetingDetector.isMeetingInProgress()
-            AppLogger.shared.log("Work cycle ended — meetingDetected=\(meetingInProgress)")
-            if meetingInProgress {
-                remainingSeconds = meetingRetrySeconds
-                sendMeetingDelayNotification()
-                refreshStatusTitle()
-                return
+            guard !isCheckingMeeting else { return }
+            isCheckingMeeting = true
+            Task.detached(priority: .utility) { [weak self] in
+                let meetingInProgress = MeetingDetector.isMeetingInProgress()
+                await self?.finishWorkCheck(meetingInProgress: meetingInProgress)
             }
-
-            sendBreakNotification()
-            AppLogger.shared.log("Phase transition: work → rest (breakSeconds=\(breakSeconds))")
-            phase = .rest
-            remainingSeconds = breakSeconds
         case .rest:
             AppLogger.shared.log("Phase transition: rest → work (workMinutes=\(workMinutes))")
             phase = .work
             remainingSeconds = workMinutes * 60
+            refreshStatusTitle()
+        }
+    }
+
+    private func finishWorkCheck(meetingInProgress: Bool) {
+        // Pause/sleep clears the flag; if cleared, discard the stale result.
+        guard isCheckingMeeting else { return }
+        isCheckingMeeting = false
+
+        AppLogger.shared.log("Work cycle ended — meetingDetected=\(meetingInProgress)")
+        if meetingInProgress {
+            remainingSeconds = meetingRetrySeconds
+            sendMeetingDelayNotification()
+            refreshStatusTitle()
+            return
         }
 
+        sendBreakNotification()
+        AppLogger.shared.log("Phase transition: work → rest (breakSeconds=\(breakSeconds))")
+        phase = .rest
+        remainingSeconds = breakSeconds
         refreshStatusTitle()
     }
 
